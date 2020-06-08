@@ -5,5 +5,6 @@ dependencies:
   opencv
   Pylon
   
-./src/  // use single camera to detect spark
-./MultipleCameras/ // use mutiple cameras 
+./src/  # use single camera to detect spark
+
+./MultipleCameras/ # use mutiple cameras 
