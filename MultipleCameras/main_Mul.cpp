@@ -70,6 +70,7 @@ int main(int argc, char* argv[])
 	ParamManager_Mul PARAM_MUL;
 	sparkDect_Mul SPARK_MUL;
 	RegionProps properties;
+	SYSTEMTIME sys;
 
 	if (!SPARK_MUL.CheckFreeSpace())
 	{
@@ -99,19 +100,6 @@ int main(int argc, char* argv[])
 			return 1;
 		}
 
-		// Create a video writer object.
-		CVideoWriter videoWriter, videoWriter_2;
-		videoWriter.ThreadCount = 16;
-		videoWriter_2.ThreadCount = 16;
-		using memfunc_type = void (CVideoWriter::*)(const IImage& image);
-		memfunc_type memfunc = &CVideoWriter::Add;
-
-		SYSTEMTIME sys;
-
-		// The frame rate used for playing the video (playback frame rate).
-		const int cFramesPerSecond = 20;
-		// The quality used for compressing the video.
-		const uint32_t cQuality = 100;
 
 		// Get the transport layer factory.
 		CTlFactory& tlFactory = CTlFactory::GetInstance();
@@ -144,10 +132,8 @@ int main(int argc, char* argv[])
 			std::cout << "Cannot find any camera!" << std::endl;
 			return 0;
 		}
-		else
-		{
-			SPARK_MUL.SelectDevice(numDevices);
-		}
+		SPARK_MUL.SelectDevice(numDevices);
+
 		// Create an array of instant cameras for the found devices and avoid exceeding a maximum number of devices.
 		CInstantCameraArray cameras(c_maxCamerasToUse);
 
@@ -164,7 +150,7 @@ int main(int argc, char* argv[])
 		CIntegerParameter width;
 		CIntegerParameter height;
 		CEnumParameter pixelFormat;
-		CIntegerParameter exposuretimeRaw[2];
+		CIntegerParameter exposuretimeRaw[c_maxCamerasToUse];
 		CStringParameter cameraname;
 		for (size_t i = 0; i < cameras.GetSize(); ++i)
 		{
@@ -285,27 +271,34 @@ int main(int argc, char* argv[])
 		CPixelTypeMapper pixelTypeMapper(&pixelFormat);
 		EPixelType pixelType = pixelTypeMapper.GetPylonPixelTypeFromNodeValue(pixelFormat.GetIntValue());
 
-		// Set parameters before opening the video writer.
-		videoWriter.SetParameter(
-			(uint32_t)width.GetValue(),
-			(uint32_t)height.GetValue(),
-			pixelType,
-			cFramesPerSecond,
-			cQuality);
+		// Create a video writer object.
+		CVideoWriter* videoWriter = new CVideoWriter[c_maxCamerasToUse];
 
-		// Set parameters before opening the video writer.
-		videoWriter_2.SetParameter(
-			(uint32_t)width.GetValue(),
-			(uint32_t)height.GetValue(),
-			pixelType,
-			cFramesPerSecond,
-			cQuality);
+		using memfunc_type = void (CVideoWriter::*)(const IImage& image);
+		memfunc_type memfunc = &CVideoWriter::Add;
+
+		// The frame rate used for playing the video (playback frame rate).
+		const int cFramesPerSecond = 20;
+		// The quality used for compressing the video.
+		const uint32_t cQuality = 100;
 
 		GetLocalTime(&sys);
 		std::ostringstream FirstName;
 		FirstName << sys.wMonth << "-" << sys.wDay << "-" << sys.wHour << "-" << sys.wMinute << "-" << sys.wSecond;
-		videoWriter.Open(SPARK_MUL.GetStoragePath().c_str() + SPARK_MUL.CamName[0] + "_" + FirstName.str().c_str() + "_First.mp4");
-		videoWriter_2.Open(SPARK_MUL.GetStoragePath().c_str() + SPARK_MUL.CamName[1] + "_" + FirstName.str().c_str() + "_First.mp4");
+
+		for (int i = 0; i < c_maxCamerasToUse; i++)
+		{
+			videoWriter[i].ThreadCount = 16;
+			// Set parameters before opening the video writer.
+			videoWriter[i].SetParameter(
+				(uint32_t)width.GetValue(),
+				(uint32_t)height.GetValue(),
+				pixelType,
+				cFramesPerSecond,
+				cQuality);
+
+			videoWriter[i].Open(SPARK_MUL.GetStoragePath().c_str() + SPARK_MUL.CamName[i] + "_" + FirstName.str().c_str() + "_First.mp4");
+		}
 
 		// Starts grabbing for all cameras starting with index 0. The grabbing
 		// is started for one camera after the other. That's why the images of all
@@ -346,17 +339,24 @@ int main(int argc, char* argv[])
 			cout << "Gray value of first pixel: " << (uint32_t)pImageBuffer[0] << endl << endl;
 
 		}*/
+
+		cv::Mat closeKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+
+		std::vector <std::vector<CPylonImage>> ImgVec{ c_maxCamerasToUse,
+			std::vector<CPylonImage>(10, CPylonImage::Create(PixelType_Mono8, (uint32_t)width.GetValue(), (uint32_t)height.GetValue())) };
+
+		int ItCount[c_maxCamerasToUse]{ 0,0 };
+		std::vector<CPylonImage>::iterator VecIt[c_maxCamerasToUse];
+		for (int i = 0; i < c_maxCamerasToUse; i++)
+		{
+			VecIt[i] = ImgVec[i].begin();
+		}
+		CPylonImage* pImg = new CPylonImage[c_maxCamerasToUse]{ CPylonImage::Create(PixelType_Mono8, (uint32_t)width.GetValue(), (uint32_t)height.GetValue()) };
+		std::thread WriteThread[c_maxCamerasToUse];
+
 		int SparkRegion = 0;
 		int SaveCount = 0;
-		int It_1Count = 0;
-		int It_2Count = 0;
-		cv::Mat closeKernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
-		std::vector<CPylonImage> ImgVector(10, CPylonImage::Create(PixelType_Mono8, (uint32_t)width.GetValue(), (uint32_t)height.GetValue()));
-		std::vector<CPylonImage> ImgVector_2(10, CPylonImage::Create(PixelType_Mono8, (uint32_t)width.GetValue(), (uint32_t)height.GetValue()));
-		std::vector<CPylonImage>::iterator VecIt = ImgVector.begin();
-		std::vector<CPylonImage>::iterator VecIt_2 = ImgVector_2.begin();
-		CPylonImage pImg;
-		CPylonImage pImg_2;
+		bool SaveFlag = false;
 		while (cameras.IsGrabbing())
 		{
 			// Wait for an image and then retrieve it. A timeout of 5000 ms is used.
@@ -392,13 +392,13 @@ int main(int argc, char* argv[])
 			}
 
 			intptr_t cameraContextValue = ptrGrabResult->GetCameraContext();
-			cout << "Camera " << cameraContextValue << ": " << cameras[cameraContextValue].GetDeviceInfo().GetModelName() << endl;
+			std::cout << "Camera " << cameraContextValue << ": " << cameras[cameraContextValue].GetDeviceInfo().GetModelName() << std::endl;
 
 			if (ptrGrabResult->GrabSucceeded())
 			{
 				// Access the image data.
-				std::cout << "SizeX: " << ptrGrabResult->GetWidth() << std::endl;
-				std::cout << "SizeY: " << ptrGrabResult->GetHeight() << std::endl;
+				//std::cout << "SizeX: " << ptrGrabResult->GetWidth() << std::endl;
+				//std::cout << "SizeY: " << ptrGrabResult->GetHeight() << std::endl;
 
 				/*const uint8_t* pImageBuffer = (uint8_t*)ptrGrabResult->GetBuffer();
 				std::cout << "Gray value of first pixel: " << (uint32_t)pImageBuffer[0] << std::endl << std::endl;*/
@@ -406,7 +406,7 @@ int main(int argc, char* argv[])
 			else
 			{
 				std::cout << "Error: " << ptrGrabResult->GetErrorCode() << " " << ptrGrabResult->GetErrorDescription() << std::endl;
-				break;
+				continue;
 			}
 
 #ifdef PYLON_WIN_BUILD
@@ -417,7 +417,6 @@ int main(int argc, char* argv[])
 			//////////////////proc image
 			auto start1 = std::chrono::high_resolution_clock::now();
 
-			SparkRegion = 0;
 			cv::Mat Img(ptrGrabResult->GetHeight(), ptrGrabResult->GetWidth(), CV_8UC1, (uint8_t*)ptrGrabResult->GetBuffer());
 
 			cv::Mat imgThresh;
@@ -432,27 +431,22 @@ int main(int argc, char* argv[])
 			std::vector<cv::Vec4i> hierarchy;
 			cv::findContours(imgClosed, allContours, hierarchy, 0, 1);
 
-			bool SaveFlag = false;
+
+			SparkRegion = 0;
+			SaveFlag = false;
 			if (allContours.empty())
 			{
-				std::cout << "没有Contour" << std::endl;
-				std::cout << "没有火花" << std::endl;
+				std::cout << "No Contours, No Spark" << std::endl;
 				++SaveCount;
 			}
 			else
 			{
 				std::sort(allContours.begin(), allContours.end(), descendSort);
-				if (allContours[0].size() <= 5)
-				{
-					std::cout << "allContours[0].size() :    " << allContours[0].size() << std::endl;
-					std::cout << "没有火花" << std::endl;
-					++SaveCount;
-				}
-				else
+				if (allContours[0].size() > 5)
 				{
 					for (int i = 0; i < allContours.size(); i++)
 					{
-						std::cout << "CONTOUR[i] SIZE: " << allContours[i].size() << std::endl;
+						//std::cout << "CONTOUR[i] SIZE: " << allContours[i].size() << std::endl;
 						properties.getContour(allContours[i]);
 						//std::cout << "CONTOUR SIZE: " << properties.contour.size() << std::endl;
 						properties.compute();
@@ -466,163 +460,77 @@ int main(int argc, char* argv[])
 							++SparkRegion;
 						}
 					}
-					if (SparkRegion > 0)
-					{
-						SaveFlag = true;
-					}
-					else
-					{
-						++SaveCount;
-					}
 				}
+				if (SparkRegion > 0)
+				{
+					SaveFlag = true;
+				}
+				//std::cout << "allContours[0].size() :    " << allContours[0].size() << std::endl;
+				std::cout << "No Contours, No Spark" << std::endl;
+				++SaveCount;
+			}
+			if (SaveFlag)
+			{
+				SaveCount = 0;
 			}
 
-			if (cameraContextValue == SPARK_MUL.CamNum[0])
+			pImg[cameraContextValue].AttachGrabResultBuffer(ptrGrabResult);
+			*VecIt[cameraContextValue] = pImg[cameraContextValue];
+
+			try
 			{
-				pImg.AttachGrabResultBuffer(ptrGrabResult);
-				*VecIt = pImg;
-				// If required, the grabbed image is converted to the correct format and is then added to the video file.
-				// If the orientation of the image does not mach the orientation required for video compression, the
-				// image will be flipped automatically to ImageOrientation_TopDown, unless the input pixel type is Yuv420p.
-				try
+				/*if (SaveCount > 10000)
+				{	
+					std::cout << "SaveCount > 2000 " << std::endl;
+					continue;
+				}*/
+				WriteThread[cameraContextValue] = std::thread(memfunc, &videoWriter[cameraContextValue], *VecIt[cameraContextValue]);
+				WriteThread[cameraContextValue].detach();
+				++VecIt[cameraContextValue];
+				++ItCount[cameraContextValue];
+				if (ItCount[cameraContextValue] == 8)
 				{
-					/*if (SaveCount <= 10)
-					{
-						videoWriter.Add(ptrGrabResult);
-					}*/
-					std::thread WriteThread(memfunc, &videoWriter, *VecIt);
-					WriteThread.detach();
-					++VecIt;
-					++It_1Count;
-					if (It_1Count == 8)
-					{
-						VecIt = ImgVector.begin();
-						It_1Count = 0;
-					}
-					//cv::waitKey(2);
+					VecIt[cameraContextValue] = ImgVec[cameraContextValue].begin();
+					ItCount[cameraContextValue] = 0;
 				}
-				catch (const GenericException& e)
-				{
-					// Error handling.
-					std::cerr << "An ---------------VideoWriter---------- exception occurred." << std::endl
-						<< e.GetDescription() << std::endl;
-					CImagePersistence::Save(ImageFileFormat_Png, "D:\\lay\\c++\\errorImage\\1.png", ptrGrabResult);
-					exitCode = 2;
-					break;
-
-				}
-
-				// Check whether the image data size limit has been reached to avoid the video file becoming too large.
-				if (BytesThreshold < videoWriter.BytesWritten.GetValue())
-				{
-					std::cout << "The image data size limit has been reached." << std::endl;
-					if (!SPARK_MUL.WhetherProgContinue())
-					{
-						std::cerr << "the disk doesn't have enough space" << std::endl;
-						break;
-					}
-					videoWriter.Close();
-					GetLocalTime(&sys);
-					std::ostringstream vName;
-					vName << sys.wMonth << "-" << sys.wDay << "-" << sys.wHour << "-" << sys.wMinute << "-" << sys.wSecond;
-					videoWriter.SetParameter(
-						(uint32_t)width.GetValue(),
-						(uint32_t)height.GetValue(),
-						pixelType,
-						cFramesPerSecond,
-						cQuality);
-					videoWriter.Open(SPARK_MUL.GetStoragePath().c_str() + SPARK_MUL.CamName[cameraContextValue] + "_" + vName.str().c_str() + ".mp4");
-
-					//cvVideoCreator = SPARK_MUL.CreateNewVideo();
-					if (!videoWriter.IsOpen())
-					{
-						std::cerr << "Could not open the new video file for write\n" << std::endl;
-						break;
-					}
-				}
-				// If images are skipped, writing video frames takes too much processing time.
-				std::cout << "Images Skipped = " << ptrGrabResult->GetNumberOfSkippedImages() << std::boolalpha
-					<< "; Image has been converted = " << !videoWriter.CanAddWithoutConversion(ptrGrabResult)
-					<< std::endl;
 			}
-			else if (cameraContextValue == SPARK_MUL.CamNum[1])
+			catch (const GenericException& e)
 			{
-				pImg_2.AttachGrabResultBuffer(ptrGrabResult);
-				*VecIt_2 = pImg_2;
-				// If required, the grabbed image is converted to the correct format and is then added to the video file.
-				// If the orientation of the image does not mach the orientation required for video compression, the
-				// image will be flipped automatically to ImageOrientation_TopDown, unless the input pixel type is Yuv420p.
-				try
+				// Error handling.
+				std::cerr << "An ---------------VideoWriter---------- exception occurred." << std::endl
+					<< e.GetDescription() << std::endl;
+				CImagePersistence::Save(ImageFileFormat_Png, "D:\\lay\\c++\\errorImage\\1.png", ptrGrabResult);
+				exitCode = 2;
+				break;
+			}
+			if (BytesThreshold < videoWriter[cameraContextValue].BytesWritten.GetValue())
+			{
+				std::cout << "The image data size limit has been reached." << std::endl;
+				SPARK_MUL.WhetherProgContinue();
+				videoWriter[cameraContextValue].Close();
+				GetLocalTime(&sys);
+				std::ostringstream vName;
+				vName << sys.wMonth << "-" << sys.wDay << "-" << sys.wHour << "-" << sys.wMinute << "-" << sys.wSecond;
+				videoWriter[cameraContextValue].SetParameter(
+					(uint32_t)width.GetValue(),
+					(uint32_t)height.GetValue(),
+					pixelType,
+					cFramesPerSecond,
+					cQuality);
+				videoWriter[cameraContextValue].Open(SPARK_MUL.GetStoragePath().c_str() + SPARK_MUL.CamName[cameraContextValue] + "_" + vName.str().c_str() + ".mp4");
+
+				//cvVideoCreator = SPARK_MUL.CreateNewVideo();
+				if (!videoWriter[cameraContextValue].IsOpen())
 				{
-					/*if (SaveCount <= 10)
-					{
-						videoWriter.Add(ptrGrabResult);
-					}*/
-					std::thread WriteThread_2(memfunc, &videoWriter_2, *VecIt_2);
-					WriteThread_2.detach();
-					++VecIt_2;
-					++It_2Count;
-					if (It_2Count == 8)
-					{
-						VecIt_2 = ImgVector_2.begin();
-						It_2Count = 0;
-					}
-					//cv::waitKey(2);
-				}
-				catch (const GenericException& e)
-				{
-					// Error handling.
-					std::cerr << "An ---------------VideoWriter---------- exception occurred." << std::endl
-						<< e.GetDescription() << std::endl;
-					CImagePersistence::Save(ImageFileFormat_Png, "D:\\lay\\c++\\errorImage\\1.png", ptrGrabResult);
-					exitCode = 2;
+					std::cerr << "Could not open the new video file for write\n" << std::endl;
 					break;
 				}
-
-				// Check whether the image data size limit has been reached to avoid the video file becoming too large.
-				if (BytesThreshold < videoWriter_2.BytesWritten.GetValue())
-				{
-					std::cout << "The image data size limit has been reached." << std::endl;
-					if (!SPARK_MUL.WhetherProgContinue())
-					{
-						std::cerr << "the disk doesn't have enough space" << std::endl;
-						break;
-					}
-					videoWriter_2.Close();
-					GetLocalTime(&sys);
-					std::ostringstream vName;
-					vName << sys.wMonth << "-" << sys.wDay << "-" << sys.wHour << "-" << sys.wMinute << "-" << sys.wSecond;
-					videoWriter_2.SetParameter(
-						(uint32_t)width.GetValue(),
-						(uint32_t)height.GetValue(),
-						pixelType,
-						cFramesPerSecond,
-						cQuality);
-					videoWriter_2.Open(SPARK_MUL.GetStoragePath().c_str() + SPARK_MUL.CamName[cameraContextValue] + "_" + vName.str().c_str() + ".mp4");
-
-					//cvVideoCreator = SPARK.CreateNewVideo();
-					if (!videoWriter_2.IsOpen())
-					{
-						std::cerr << "Could not open the new video file for write\n" << std::endl;
-						break;
-					}
-				}
-				// If images are skipped, writing video frames takes too much processing time.
-				std::cout << "Images Skipped = " << ptrGrabResult->GetNumberOfSkippedImages() << std::boolalpha
-					<< "; Image has been converted = " << !videoWriter_2.CanAddWithoutConversion(ptrGrabResult)
-					<< std::endl;
 			}
+			// If images are skipped, writing video frames takes too much processing time.
+			std::cout << "Images Skipped = " << ptrGrabResult->GetNumberOfSkippedImages() << std::boolalpha
+				<< "; Image has been converted = " << !videoWriter[cameraContextValue].CanAddWithoutConversion(ptrGrabResult)
+				<< std::endl;
 
-
-
-
-
-
-
-			//cv::Mat labelsMat; //CV_16U
-			//cv::Mat statsMat; //CV_32S
-			//cv::Mat centerPoints; //CV_64F
-			//auto numConnectedRegions = cv::connectedComponentsWithStats(imgClosed, labelsMat,statsMat, centerPoints, 8, 2, cv::CCL_DEFAULT);
 			//auto NumThrds = getNumThreads();
 			//cout << "cv线程数量 : " << NumThrds << "个" << endl;
 
@@ -632,15 +540,28 @@ int main(int argc, char* argv[])
 
 			std::cout << "Img Proc Time : " << timetaken1 << "ms" << std::endl;
 			//std::cout << "连通域个数 : " << numConnectedRegions << "个" << std::endl;
-			std::cout << "contour个数 : " << allContours.size() << "个" << std::endl;
-			std::cout << "SparkRegion : " << SparkRegion << "块" << std::endl;
-			std::cout << "Save count : " << SaveCount << "次" << std::endl;
+			//std::cout << "contour个数 : " << allContours.size() << "个" << std::endl;
+			//std::cout << "SparkRegion : " << SparkRegion << "块" << std::endl;
+			//std::cout << "Save count : " << SaveCount << "次" << std::endl;
 
 			//cv::imshow("tstbin", imgThresh);
 			//cv::imshow("tstmorph", imgClosed);
 			//cv::waitKey(1);
 
 		}
+
+
+		GetLocalTime(&sys);
+		std::ostringstream ptfname;
+		ptfname << sys.wMonth << "-" << sys.wDay << "-" << sys.wHour << "-" << sys.wMinute << "-" << sys.wSecond;
+
+		for (size_t i = 0; i < cameras.GetSize(); ++i)
+		{
+			CFeaturePersistence::Save(SPARK_MUL.GetStoragePath().c_str() + SPARK_MUL.CamName[i] + ptfname.str().c_str() + ".pfs", &cameras[i].GetNodeMap());
+		}
+		cv::waitKey(100);
+		delete[] pImg;
+		delete[] videoWriter;
 	}
 	catch (const GenericException& e)
 	{
