@@ -45,6 +45,10 @@ using namespace std;
 // Number of images to be grabbed.
 static const uint32_t c_countOfImagesToGrab = 10;
 static const int64_t BytesThreshold = 50 * 1024 * 1024;
+static const int BinaryThreshold = 125;
+static const int AreaThreshold = 200;
+static const int AngleThreshold = 80;
+static const int DeltaAxisThreshold = 100;
 
 // Limits the amount of cameras used for grabbing.
 // It is important to manage the available bandwidth when grabbing with multiple cameras.
@@ -420,7 +424,7 @@ int main(int argc, char* argv[])
 			cv::Mat Img(ptrGrabResult->GetHeight(), ptrGrabResult->GetWidth(), CV_8UC1, (uint8_t*)ptrGrabResult->GetBuffer());
 
 			cv::Mat imgThresh;
-			cv::threshold(Img, imgThresh, 125, 255, cv::THRESH_BINARY);
+			cv::threshold(Img, imgThresh, BinaryThreshold, 255, cv::THRESH_BINARY);
 
 
 			cv::Mat imgClosed;
@@ -450,12 +454,12 @@ int main(int argc, char* argv[])
 						properties.getContour(allContours[i]);
 						//std::cout << "CONTOUR SIZE: " << properties.contour.size() << std::endl;
 						properties.compute();
-						if (properties.region.Area() < 200 - eps)
+						if (properties.region.Area() < AreaThreshold - eps)
 						{
 							//allContours.shrink_to_fit();
 							break;
 						}
-						if (fabs(properties.region.Orientation()) < 90 - eps || properties.region.DeltaAxis() < 100 - eps)
+						if (fabs(properties.region.Orientation()) < AngleThreshold - eps || properties.region.DeltaAxis() < DeltaAxisThreshold - eps)
 						{
 							++SparkRegion;
 						}
